@@ -26,6 +26,7 @@ module InteractiveEval (
         getNamesInScope,
         getRdrNamesInScope,
         moduleIsInterpreted,
+        reapplyEvaluatedStatements,
         getInfo,
         exprType,
         typeKind,
@@ -181,7 +182,7 @@ execStmt stmt ExecOptions{..} = do
       -- empty statement / comment
       Nothing -> return (ExecComplete (Right []) 0)
 
-      Just (ids, hval, fix_env) -> do
+      Just (ids, hval, fix_env, evaledStmt) -> do
         updateFixityEnv fix_env
 
         status <-
@@ -194,8 +195,18 @@ execStmt stmt ExecOptions{..} = do
 
             size = ghciHistSize idflags'
 
-        handleRunStatus execSingleStep stmt bindings ids
+        res <- handleRunStatus execSingleStep stmt bindings ids
                         status (emptyHistory size)
+        case res of
+          ExecComplete (Right names) _ -> do
+            when (length names > 0) $ do
+              hsc_env <- getSession
+              values <- liftIO $ mapM (Linker.getHValue hsc_env) names
+              let evaledStmt' = evaledStmt { es_hvals = values }
+              let hsc_env' = hsc_env { hsc_evaluated_stmts = evaledStmt':(hsc_evaluated_stmts hsc_env) }
+              setSession hsc_env'
+            return res
+          _ -> return res
 
 
 runDecls :: GhcMonad m => String -> m [Name]
@@ -942,7 +953,7 @@ compileParsedExprRemote expr@(L loc _) = withSession $ \hsc_env -> do
         ValBinds noExt
                      (unitBag $ mkHsVarBind loc (getRdrName expr_name) expr) []
 
-  Just ([_id], hvals_io, fix_env) <- liftIO $ hscParsedStmt hsc_env let_stmt
+  Just ([_id], hvals_io, fix_env, _) <- liftIO $ hscParsedStmt hsc_env let_stmt
   updateFixityEnv fix_env
   status <- liftIO $ evalStmt hsc_env False (EvalThis hvals_io)
   case status of
@@ -1008,3 +1019,23 @@ reconstructType hsc_env bound id = do
 
 mkRuntimeUnkTyVar :: Name -> Kind -> TyVar
 mkRuntimeUnkTyVar name kind = mkTcTyVar name kind RuntimeUnk
+
+reapplyEvaluatedStatements :: GhcMonad m => m ()
+reapplyEvaluatedStatements = do
+  evaledStmts <- hsc_evaluated_stmts <$> getSession
+  newEvaledStmts <- forM (reverse evaledStmts) $ \stmt -> do
+    case es_bcos stmt of
+      Nothing -> return Nothing
+      Just bcos -> do
+        hsc_env <- getSession
+        void $ liftIO $ Linker.linkExpr hsc_env (srcLocSpan interactiveSrcLoc) $ bcos
+        let ids = es_ids stmt
+            final_ic = extendInteractiveContextWithIds (hsc_IC hsc_env) ids
+            names = map getName ids
+            hvals = es_hvals stmt
+        liftIO $ Linker.extendLinkEnv (zip names hvals)
+        hsc_env' <- liftIO $ rttiEnvironment hsc_env{hsc_IC=final_ic}
+        setSession hsc_env'
+        return $ Just stmt
+  hsc_env <- getSession
+  setSession $ hsc_env { hsc_evaluated_stmts = reverse (catMaybes newEvaledStmts) }

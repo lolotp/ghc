@@ -1799,6 +1799,7 @@ doLoad retain_context howmuch = do
                         hSetBuffering stderr NoBuffering) $ \_ -> do
       ok <- trySuccess $ GHC.load howmuch
       afterLoad ok retain_context
+      GHC.reapplyEvaluatedStatements
       return ok
 
 

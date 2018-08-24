@@ -89,7 +89,7 @@ import DynFlags         (addPluginModuleName)
 import Id
 import GHCi             ( addSptEntry )
 import GHCi.RemoteTypes ( ForeignHValue )
-import ByteCodeGen      ( byteCodeGen, coreExprToBCOs )
+import ByteCodeGen      ( byteCodeGen, coreExprToBCOs, UnlinkedBCO)
 import Linker
 import CoreTidy         ( tidyExpr )
 import Type             ( Type )
@@ -196,7 +196,8 @@ newHscEnv dflags = do
                   ,  hsc_NC           = nc_var
                   ,  hsc_FC           = fc_var
                   ,  hsc_type_env_var = Nothing
-                  , hsc_iserv        = iserv_mvar
+                  , hsc_iserv         = iserv_mvar
+                  , hsc_evaluated_stmts = []
                   }
 
 -- -----------------------------------------------------------------------------
@@ -1511,7 +1512,7 @@ IO monad as explained in Note [Interactively-bound Ids in GHCi] in HscTypes
 --
 -- We return Nothing to indicate an empty statement (or comment only), not a
 -- parse error.
-hscStmt :: HscEnv -> String -> IO (Maybe ([Id], ForeignHValue, FixityEnv))
+hscStmt :: HscEnv -> String -> IO (Maybe ([Id], ForeignHValue, FixityEnv, EvaluatedStatement))
 hscStmt hsc_env stmt = hscStmtWithLocation hsc_env stmt "<interactive>" 1
 
 -- | Compile a stmt all the way to an HValue, but don't run it
@@ -1524,7 +1525,8 @@ hscStmtWithLocation :: HscEnv
                     -> Int    -- ^ Starting line
                     -> IO ( Maybe ([Id]
                           , ForeignHValue {- IO [HValue] -}
-                          , FixityEnv))
+                          , FixityEnv
+                          , EvaluatedStatement))
 hscStmtWithLocation hsc_env0 stmt source linenumber =
   runInteractiveHsc hsc_env0 $ do
     maybe_stmt <- hscParseStmtWithLocation source linenumber stmt
@@ -1539,7 +1541,8 @@ hscParsedStmt :: HscEnv
               -> GhciLStmt GhcPs  -- ^ The parsed statement
               -> IO ( Maybe ([Id]
                     , ForeignHValue {- IO [HValue] -}
-                    , FixityEnv))
+                    , FixityEnv
+                    , EvaluatedStatement))
 hscParsedStmt hsc_env stmt = runInteractiveHsc hsc_env $ do
   -- Rename and typecheck it
   (ids, tc_expr, fix_env) <- ioMsgMaybe $ tcRnStmt hsc_env stmt
@@ -1554,9 +1557,9 @@ hscParsedStmt hsc_env stmt = runInteractiveHsc hsc_env $ do
   -- for linking, else we try to link 'main' and can't find it.
   -- Whereas the linker already knows to ignore 'interactive'
   let src_span = srcLocSpan interactiveSrcLoc
-  hval <- liftIO $ hscCompileCoreExpr hsc_env src_span ds_expr
+  (hval, bcos) <- liftIO $ hscCompileCoreExpr hsc_env src_span ds_expr
 
-  return $ Just (ids, hval, fix_env)
+  return $ Just (ids, hval, fix_env, EvaluatedStatement bcos ids [])
 
 -- | Compile a decls
 hscDecls :: HscEnv
@@ -1765,11 +1768,14 @@ hscParseThingWithLocation source linenumber parser str
 %*                                                                      *
 %********************************************************************* -}
 
-hscCompileCoreExpr :: HscEnv -> SrcSpan -> CoreExpr -> IO ForeignHValue
-hscCompileCoreExpr hsc_env =
-  lookupHook hscCompileCoreExprHook hscCompileCoreExpr' (hsc_dflags hsc_env) hsc_env
+hscCompileCoreExpr :: HscEnv -> SrcSpan -> CoreExpr -> IO (ForeignHValue, Maybe UnlinkedBCO)
+hscCompileCoreExpr hsc_env src_span expr = do
+  let hookFunc = hscCompileCoreExprHook $ hooks $ hsc_dflags hsc_env
+  case hookFunc of
+    Just func -> (,) <$> func hsc_env src_span expr <*> return Nothing
+    Nothing -> hscCompileCoreExpr' hsc_env src_span expr
 
-hscCompileCoreExpr' :: HscEnv -> SrcSpan -> CoreExpr -> IO ForeignHValue
+hscCompileCoreExpr' :: HscEnv -> SrcSpan -> CoreExpr -> IO (ForeignHValue, Maybe UnlinkedBCO)
 hscCompileCoreExpr' hsc_env srcspan ds_expr
     = do { let dflags = hsc_dflags hsc_env
 
@@ -1792,7 +1798,7 @@ hscCompileCoreExpr' hsc_env srcspan ds_expr
            {- link it -}
          ; hval <- linkExpr hsc_env srcspan bcos
 
-         ; return hval }
+         ; return (hval, Just bcos) }
 
 
 {- **********************************************************************

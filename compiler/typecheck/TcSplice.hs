@@ -749,7 +749,7 @@ runMeta' show_code ppr_hs run_and_convert expr
                          HscMain.hscCompileCoreExpr hsc_env src_span ds_expr
         ; case either_hval of {
             Left exn   -> fail_with_exn "compile and link" exn ;
-            Right hval -> do
+            Right (hval, _) -> do
 
         {       -- Coerce it to Q t, and run it
 

@@ -10,6 +10,7 @@
 -- | Types for the per-module compiler
 module HscTypes (
         -- * compilation state
+        EvaluatedStatement(..),
         HscEnv(..), hscEPS,
         FinderCache, FindResult(..), InstalledFindResult(..),
         Target(..), TargetId(..), pprTarget, pprTargetId,
@@ -358,6 +359,14 @@ shouldPrintWarning dflags ReasonUnrecognisedFlag
 shouldPrintWarning _ _
   = True
 
+data EvaluatedStatement
+  = EvaluatedStatement {
+      es_bcos :: Maybe UnlinkedBCO,
+      es_ids :: [Id],
+      es_hvals :: [ForeignHValue]
+      -- TODO: persist fixity information
+  }
+
 {-
 ************************************************************************
 *                                                                      *
@@ -431,6 +440,7 @@ data HscEnv
         , hsc_iserv :: MVar (Maybe IServ)
                 -- ^ interactive server process.  Created the first
                 -- time it is needed.
+        , hsc_evaluated_stmts :: [EvaluatedStatement]
  }
 
 -- Note [hsc_type_env_var hack]

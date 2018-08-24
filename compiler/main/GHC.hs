@@ -95,7 +95,7 @@ module GHC (
 
         -- ** Executing statements
         execStmt, ExecOptions(..), execOptions, ExecResult(..),
-        resumeExec,
+        resumeExec, reapplyEvaluatedStatements,
 
         -- ** Adding new declarations
         runDecls, runDeclsWithLocation,
