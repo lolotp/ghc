@@ -53,7 +53,7 @@ import GHC ( LoadHowMuch(..), Target(..),  TargetId(..), InteractiveImport(..),
 import HsImpExp
 import HsSyn
 import HscTypes ( tyThingParent_maybe, handleFlagWarnings, getSafeMode, hsc_IC,
-                  setInteractivePrintName, hsc_dflags, msObjFilePath )
+                  setInteractivePrintName, hsc_dflags, msObjFilePath, ic_execed_stmts )
 import Module
 import Name
 import Packages ( trusted, getPackageDetails, getInstalledPackageDetails,
@@ -1792,6 +1792,7 @@ doLoad retain_context howmuch = do
   -- Enable buffering stdout and stderr as we're compiling. Keeping these
   -- handles unbuffered will just slow the compilation down, especially when
   -- compiling in parallel.
+  execedStmts <- (ic_execed_stmts . hsc_IC) <$> GHC.getSession
   gbracket (liftIO $ do hSetBuffering stdout LineBuffering
                         hSetBuffering stderr LineBuffering)
            (\_ ->
@@ -1799,7 +1800,7 @@ doLoad retain_context howmuch = do
                         hSetBuffering stderr NoBuffering) $ \_ -> do
       ok <- trySuccess $ GHC.load howmuch
       afterLoad ok retain_context
-      GHC.reapplyEvaluatedStatements
+      GHC.reapplyExecutedStatements execedStmts
       return ok
 
 

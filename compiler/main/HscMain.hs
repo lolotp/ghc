@@ -197,7 +197,6 @@ newHscEnv dflags = do
                   ,  hsc_FC           = fc_var
                   ,  hsc_type_env_var = Nothing
                   , hsc_iserv         = iserv_mvar
-                  , hsc_evaluated_stmts = []
                   }
 
 -- -----------------------------------------------------------------------------
@@ -1512,7 +1511,7 @@ IO monad as explained in Note [Interactively-bound Ids in GHCi] in HscTypes
 --
 -- We return Nothing to indicate an empty statement (or comment only), not a
 -- parse error.
-hscStmt :: HscEnv -> String -> IO (Maybe ([Id], ForeignHValue, FixityEnv, EvaluatedStatement))
+hscStmt :: HscEnv -> String -> IO (Maybe ([Id], ForeignHValue, FixityEnv, ExecutedStatement))
 hscStmt hsc_env stmt = hscStmtWithLocation hsc_env stmt "<interactive>" 1
 
 -- | Compile a stmt all the way to an HValue, but don't run it
@@ -1526,7 +1525,7 @@ hscStmtWithLocation :: HscEnv
                     -> IO ( Maybe ([Id]
                           , ForeignHValue {- IO [HValue] -}
                           , FixityEnv
-                          , EvaluatedStatement))
+                          , ExecutedStatement))
 hscStmtWithLocation hsc_env0 stmt source linenumber =
   runInteractiveHsc hsc_env0 $ do
     maybe_stmt <- hscParseStmtWithLocation source linenumber stmt
@@ -1542,7 +1541,7 @@ hscParsedStmt :: HscEnv
               -> IO ( Maybe ([Id]
                     , ForeignHValue {- IO [HValue] -}
                     , FixityEnv
-                    , EvaluatedStatement))
+                    , ExecutedStatement))
 hscParsedStmt hsc_env stmt = runInteractiveHsc hsc_env $ do
   -- Rename and typecheck it
   (ids, tc_expr, fix_env) <- ioMsgMaybe $ tcRnStmt hsc_env stmt
@@ -1559,7 +1558,7 @@ hscParsedStmt hsc_env stmt = runInteractiveHsc hsc_env $ do
   let src_span = srcLocSpan interactiveSrcLoc
   (hval, bcos) <- liftIO $ hscCompileCoreExpr hsc_env src_span ds_expr
 
-  return $ Just (ids, hval, fix_env, EvaluatedStatement bcos ids [])
+  return $ Just (ids, hval, fix_env, ExecutedStatement bcos ids [])
 
 -- | Compile a decls
 hscDecls :: HscEnv

@@ -26,7 +26,7 @@ module InteractiveEval (
         getNamesInScope,
         getRdrNamesInScope,
         moduleIsInterpreted,
-        reapplyEvaluatedStatements,
+        reapplyExecutedStatements,
         getInfo,
         exprType,
         typeKind,
@@ -182,7 +182,7 @@ execStmt stmt ExecOptions{..} = do
       -- empty statement / comment
       Nothing -> return (ExecComplete (Right []) 0)
 
-      Just (ids, hval, fix_env, evaledStmt) -> do
+      Just (ids, hval, fix_env, execed_stmt) -> do
         updateFixityEnv fix_env
 
         status <-
@@ -200,10 +200,13 @@ execStmt stmt ExecOptions{..} = do
         case res of
           ExecComplete (Right names) _ -> do
             when (length names > 0) $ do
+              liftIO $ putStrLn "remembering statements"
               hsc_env <- getSession
               values <- liftIO $ mapM (Linker.getHValue hsc_env) names
-              let evaledStmt' = evaledStmt { es_hvals = values }
-              let hsc_env' = hsc_env { hsc_evaluated_stmts = evaledStmt':(hsc_evaluated_stmts hsc_env) }
+              let execed_stmt' = execed_stmt { es_hvals = values }
+                  current_execed_stmts = execed_stmt':(ic_execed_stmts (hsc_IC hsc_env))
+                  final_ic = (hsc_IC hsc_env) { ic_execed_stmts = current_execed_stmts }
+                  hsc_env' = hsc_env { hsc_IC = final_ic }
               setSession hsc_env'
             return res
           _ -> return res
@@ -1020,10 +1023,9 @@ reconstructType hsc_env bound id = do
 mkRuntimeUnkTyVar :: Name -> Kind -> TyVar
 mkRuntimeUnkTyVar name kind = mkTcTyVar name kind RuntimeUnk
 
-reapplyEvaluatedStatements :: GhcMonad m => m ()
-reapplyEvaluatedStatements = do
-  evaledStmts <- hsc_evaluated_stmts <$> getSession
-  newEvaledStmts <- forM (reverse evaledStmts) $ \stmt -> do
+reapplyExecutedStatements :: GhcMonad m => [ExecutedStatement] -> m ()
+reapplyExecutedStatements execed_stmts = do
+  new_execed_stmts <- forM (reverse execed_stmts) $ \stmt -> do
     case es_bcos stmt of
       Nothing -> return Nothing
       Just bcos -> do
@@ -1038,4 +1040,8 @@ reapplyEvaluatedStatements = do
         setSession hsc_env'
         return $ Just stmt
   hsc_env <- getSession
-  setSession $ hsc_env { hsc_evaluated_stmts = reverse (catMaybes newEvaledStmts) }
+  setSession $ hsc_env {
+    hsc_IC = (hsc_IC hsc_env)  {
+      ic_execed_stmts = reverse (catMaybes new_execed_stmts)
+    }
+  }

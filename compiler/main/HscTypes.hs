@@ -10,7 +10,7 @@
 -- | Types for the per-module compiler
 module HscTypes (
         -- * compilation state
-        EvaluatedStatement(..),
+        ExecutedStatement(..),
         HscEnv(..), hscEPS,
         FinderCache, FindResult(..), InstalledFindResult(..),
         Target(..), TargetId(..), pprTarget, pprTargetId,
@@ -359,8 +359,8 @@ shouldPrintWarning dflags ReasonUnrecognisedFlag
 shouldPrintWarning _ _
   = True
 
-data EvaluatedStatement
-  = EvaluatedStatement {
+data ExecutedStatement
+  = ExecutedStatement {
       es_bcos :: Maybe UnlinkedBCO,
       es_ids :: [Id],
       es_hvals :: [ForeignHValue]
@@ -440,7 +440,6 @@ data HscEnv
         , hsc_iserv :: MVar (Maybe IServ)
                 -- ^ interactive server process.  Created the first
                 -- time it is needed.
-        , hsc_evaluated_stmts :: [EvaluatedStatement]
  }
 
 -- Note [hsc_type_env_var hack]
@@ -1602,8 +1601,9 @@ data InteractiveContext
              -- ^ The function that is used for printing results
              -- of expressions in ghci and -e mode.
 
-         ic_cwd :: Maybe FilePath
+         ic_cwd :: Maybe FilePath,
              -- virtual CWD of the program
+         ic_execed_stmts :: [ExecutedStatement]
     }
 
 data InteractiveImport
@@ -1632,7 +1632,8 @@ emptyInteractiveContext dflags
        ic_int_print  = printName,    -- System.IO.print by default
        ic_default    = Nothing,
        ic_resume     = [],
-       ic_cwd        = Nothing }
+       ic_cwd        = Nothing,
+       ic_execed_stmts = [] }
 
 icInteractiveModule :: InteractiveContext -> Module
 icInteractiveModule (InteractiveContext { ic_mod_index = index })
